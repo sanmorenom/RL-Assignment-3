@@ -40,7 +40,7 @@ class Critic(nn.Module):
             x = F.relu(getattr(self, 'layer%d' % (idx+1))(x))
         return self.c_out(x)
     
-class ActorCritic():
+class ModelFreeLearner():
     """
     Actor Crtitc implementation
     """
@@ -62,6 +62,7 @@ class ActorCritic():
         self.values = []
         self.log_probs = []
         self.rewards = []
+        self.deltas = []
 
         # initilize optimizers
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=lr)
@@ -84,19 +85,14 @@ class ActorCritic():
         del self.values[:]
         del self.log_probs[:]
         del self.rewards[:]
+        del self.deltas[:]
 
-    def __update_actor__(self,returns):
-        # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
-        loss = torch.sum(-torch.stack(self.log_probs) * torch.tensor(returns))
-
-        # do gradient decent step
-        self.actor_optim.zero_grad()
-        loss.backward()
-        self.actor_optim.step()
+    def __update_actor__(self, returns):
+        pass
 
     def __update_critic__(self,returns):
         # loss between target value (calculated from returns) and predicted q_vals
-        loss = F.smooth_l1_loss(torch.stack(self.values).squeeze(-1), torch.as_tensor(returns, dtype=float))
+        loss = F.smooth_l1_loss(torch.stack(self.values).squeeze(-1), returns)
 
         # do gradient decent step
         self.critic_optim.zero_grad()
@@ -111,21 +107,30 @@ class ActorCritic():
         for r in self.rewards[::-1]:
             R = r + self.gamma * R
             returns.insert(0,R)
-        return returns
+        return torch.as_tensor(returns, dtype=float)
 
+    def __get_deltas__(self,state, action, reward, next_state, next_action):
+        state = torch.from_numpy(state).float()
+        next_state = torch.from_numpy(next_state).float()
+        q_value = self.critic(state)[action]
+        next_q_value = self.critic(next_state)[next_action]
+        delta = (reward + self.gamma * q_value) - next_q_value
+        return delta
+    
     def optimize(self, budget):
+        iterations = budget
         episode_rewards = []
         # sample episodes within a given budget
         while budget>0:
             self.__reset_buffers__()
             state, _  = self.env.reset()
+            action, log_prob = self.__select_action__(state)
             
             terminated = False
             episode_reward = 0.0
             # sample single episode 
             for step in count(1):
                 # sample action from actor (calculate the log prob as well to prevent overhead)
-                action, log_prob = self.__select_action__(state)
 
                 # take action in env
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
@@ -135,10 +140,16 @@ class ActorCritic():
                 self.rewards.append(reward)
                 self.log_probs.append(log_prob)
 
+                next_action, log_prob = self.__select_action__(state)
+                delta = self.__get_deltas__(state,action,reward,next_state,next_action)
+                self.deltas.append(delta)
+
                 state = next_state
+                action = next_action
 
                 episode_reward += reward * (self.gamma ** step)
                 budget -=1
+
                 if terminated or truncated:
                     break
 
@@ -153,13 +164,58 @@ class ActorCritic():
             self.__reset_buffers__()
 
             episode_rewards.append(episode_reward)
-            print(episode_reward, 1e6 -budget)
+            print(episode_reward,  iterations-budget)
         return episode_rewards
+    
+
+
+    
+class REINFORCE(ModelFreeLearner):
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
+    
+    def __update_actor__(self, returns):
+        # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
+        loss = torch.sum(-torch.stack(self.log_probs) * torch.tensor(returns))
+
+        # do gradient decent step
+        self.actor_optim.zero_grad()
+        loss.backward()
+        self.actor_optim.step()
+
+class AC(ModelFreeLearner):
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
+    
+    def __update_actor__(self, returns):
+        # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
+        loss = torch.sum(-torch.stack(self.log_probs) * torch.stack(self.deltas))
+
+        # do gradient decent step
+        self.actor_optim.zero_grad()
+        loss.backward()
+        self.actor_optim.step()
+
+
+class A2C(ModelFreeLearner):
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
+    
+    def __update_actor__(self, returns):
+        # calculate advantages
+        advantages = returns - torch.stack(self.values).detach()
+        # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
+        loss = torch.sum(-torch.stack(self.log_probs) * advantages)
+
+        # do gradient decent step
+        self.actor_optim.zero_grad()
+        loss.backward()
+        self.actor_optim.step()
 
 
 if __name__ == "__main__":
     # quick test run; The episode returns are maximised at roughly 98 since we are using a discount factor 
     env = gym.make("CartPole-v1")
-    actor_critic = ActorCritic(env,2,2,0.99, 6.25e-5)
+    actor_critic = A2C(env,2,2,0.99, 6.25e-5)
     actor_critic.optimize(20000)
     print(0)
