@@ -7,6 +7,7 @@ from torch.distributions import Categorical
 import numpy as np
 from collections import namedtuple
 from itertools import count
+from time import time
 
 import gymnasium as gym
 
@@ -42,7 +43,10 @@ class Critic(nn.Module):
     
 class ModelFreeLearner():
     """
-    Actor Crtitc implementation
+    ModelFreeLearner serves as a perent class for the REINFORCE, ActorCritic (AC) and
+    Advantage Actor Critic (A2C). 
+    This design choice prevents code duplication since the core functionalities in the 
+    optimization/ training step is the same for each learner. We initialize the 
     """
     def __init__(self, env:gym.Env, n_actor_layers, n_critic_layers, gamma, lr):
         # initialize environment and exrtract state and action space
@@ -119,19 +123,20 @@ class ModelFreeLearner():
     
     def optimize(self, budget):
         iterations = budget
+        t0 = time()
         episode_rewards = []
         # sample episodes within a given budget
         while budget>0:
             self.__reset_buffers__()
             state, _  = self.env.reset()
+
+            # sample action from actor (calculate the log prob as well to prevent overhead)
             action, log_prob = self.__select_action__(state)
             
             terminated = False
             episode_reward = 0.0
             # sample single episode 
             for step in count(1):
-                # sample action from actor (calculate the log prob as well to prevent overhead)
-
                 # take action in env
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 
@@ -140,20 +145,22 @@ class ModelFreeLearner():
                 self.rewards.append(reward)
                 self.log_probs.append(log_prob)
 
+                # calculate the td error (called delta here)
                 next_action, log_prob = self.__select_action__(state)
                 delta = self.__get_deltas__(state,action,reward,next_state,next_action)
                 self.deltas.append(delta)
-
+                
+                # advance state and action
                 state = next_state
                 action = next_action
 
-                episode_reward += reward * (self.gamma ** step)
+                episode_reward += reward 
                 budget -=1
 
                 if terminated or truncated:
                     break
 
-            # calculate returns based on rewards
+            # calculate returns based on rewards 
             returns = self.__get_returns__()
 
             # update both actor and critic
@@ -163,8 +170,11 @@ class ModelFreeLearner():
             # empty the buffers
             self.__reset_buffers__()
 
-            episode_rewards.append(episode_reward)
-            print(episode_reward,  iterations-budget)
+            episode_rewards.append((episode_reward,iterations-budget))
+            progress = (((iterations-budget)/iterations)*100)
+            eta = (time()-t0)*((100-progress)/progress)
+            print(f"\rProgress: {progress:.2f}% ETA: {(eta):.0f}s", end='', flush=True)
+        print() 
         return episode_rewards
     
 
@@ -182,6 +192,12 @@ class REINFORCE(ModelFreeLearner):
         self.actor_optim.zero_grad()
         loss.backward()
         self.actor_optim.step()
+
+    # override functions to prevent computational overhead   
+    def __update_critic__(self, returns):
+        pass
+    def __get_deltas__(self, state, action, reward, next_state, next_action):
+        pass
 
 class AC(ModelFreeLearner):
     def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
@@ -204,7 +220,8 @@ class A2C(ModelFreeLearner):
     def __update_actor__(self, returns):
         # calculate advantages
         advantages = returns - torch.stack(self.values).detach()
-        # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
+        # consider normalizing advantages for stability 
+        #advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) 
         loss = torch.sum(-torch.stack(self.log_probs) * advantages)
 
         # do gradient decent step
@@ -213,9 +230,10 @@ class A2C(ModelFreeLearner):
         self.actor_optim.step()
 
 
+
 if __name__ == "__main__":
+
     # quick test run; The episode returns are maximised at roughly 98 since we are using a discount factor 
     env = gym.make("CartPole-v1")
-    actor_critic = A2C(env,2,2,0.99, 6.25e-5)
-    actor_critic.optimize(20000)
-    print(0)
+    actor_critic = A2C(env,1,1,0.99, 6.25e-5)
+    actor_critic.optimize(200000)
