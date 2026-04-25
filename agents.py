@@ -48,7 +48,7 @@ class ModelFreeLearner():
     This design choice prevents code duplication since the core functionalities in the 
     optimization/ training step is the same for each learner. We initialize the 
     """
-    def __init__(self, env:gym.Env, n_actor_layers, n_critic_layers, gamma, lr):
+    def __init__(self, env:gym.Env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
         # initialize environment and exrtract state and action space
         self.env = env
         self.n_actions = self.env.action_space.n
@@ -66,11 +66,10 @@ class ModelFreeLearner():
         self.values = []
         self.log_probs = []
         self.rewards = []
-        self.deltas = []
 
         # initilize optimizers
-        self.actor_optim = optim.Adam(self.actor.parameters(), lr=lr)
-        self.critic_optim = optim.Adam(self.critic.parameters(), lr=lr)
+        self.actor_optim = optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optim = optim.Adam(self.critic.parameters(), lr=critic_lr)
     
     def __select_action__(self, state):
         state = torch.from_numpy(state).float()
@@ -89,14 +88,13 @@ class ModelFreeLearner():
         del self.values[:]
         del self.log_probs[:]
         del self.rewards[:]
-        del self.deltas[:]
 
     def __update_actor__(self, returns):
         pass
 
     def __update_critic__(self,returns):
         # loss between target value (calculated from returns) and predicted q_vals
-        loss = F.smooth_l1_loss(torch.stack(self.values).squeeze(-1), returns)
+        loss = F.mse_loss(torch.stack(self.values), returns.detach())
 
         # do gradient decent step
         self.critic_optim.zero_grad()
@@ -111,15 +109,7 @@ class ModelFreeLearner():
         for r in self.rewards[::-1]:
             R = r + self.gamma * R
             returns.insert(0,R)
-        return torch.as_tensor(returns, dtype=float)
-
-    def __get_deltas__(self,state, action, reward, next_state, next_action):
-        state = torch.from_numpy(state).float()
-        next_state = torch.from_numpy(next_state).float()
-        q_value = self.critic(state)[action]
-        next_q_value = self.critic(next_state)[next_action]
-        delta = (reward + self.gamma * q_value) - next_q_value
-        return delta
+        return torch.as_tensor(returns, dtype=torch.float32)
     
     def optimize(self, budget):
         iterations = budget
@@ -145,10 +135,7 @@ class ModelFreeLearner():
                 self.rewards.append(reward)
                 self.log_probs.append(log_prob)
 
-                # calculate the td error (called delta here)
                 next_action, log_prob = self.__select_action__(state)
-                delta = self.__get_deltas__(state,action,reward,next_state,next_action)
-                self.deltas.append(delta)
                 
                 # advance state and action
                 state = next_state
@@ -181,12 +168,12 @@ class ModelFreeLearner():
 
     
 class REINFORCE(ModelFreeLearner):
-    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
-        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
-    
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
     def __update_actor__(self, returns):
         # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
-        loss = torch.sum(-torch.stack(self.log_probs) * torch.tensor(returns))
+        
+        loss = torch.sum(-torch.stack(self.log_probs) * returns.detach())
 
         # do gradient decent step
         self.actor_optim.zero_grad()
@@ -200,12 +187,12 @@ class REINFORCE(ModelFreeLearner):
         pass
 
 class AC(ModelFreeLearner):
-    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
-        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
     
     def __update_actor__(self, returns):
         # Calculate loss; the - is introduced since we want to acent gradients -> negative loss gradient descent 
-        loss = torch.sum(-torch.stack(self.log_probs) * torch.stack(self.deltas))
+        loss = torch.sum(-torch.stack(self.log_probs) * torch.stack(self.values).detach())
 
         # do gradient decent step
         self.actor_optim.zero_grad()
@@ -214,8 +201,8 @@ class AC(ModelFreeLearner):
 
 
 class A2C(ModelFreeLearner):
-    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, lr):
-        super().__init__(env, n_actor_layers, n_critic_layers, gamma, lr)
+    def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
+        super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
     
     def __update_actor__(self, returns):
         # calculate advantages
@@ -235,5 +222,5 @@ if __name__ == "__main__":
 
     # quick test run; The episode returns are maximised at roughly 98 since we are using a discount factor 
     env = gym.make("CartPole-v1")
-    actor_critic = A2C(env,1,1,0.99, 6.25e-5)
+    actor_critic = AC(env,1,1,0.99, 0.001,0.01)
     actor_critic.optimize(200000)

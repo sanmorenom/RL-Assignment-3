@@ -23,7 +23,7 @@ def rolling_average(data, window=20):
     return [np.mean(data[max(0, i - window + 1):i + 1]) for i in range(len(data))]
 
 
-def plot_results(results: dict[str, list[tuple]], window=20, solved_threshold=200):
+def plot_results(results: dict[str, list[tuple]], window=20, solved_threshold=500):
     """
     results: dict of {"label": episode_rewards list, ...}
     e.g. {"A2C": a2c_rewards, "AC": ac_rewards}
@@ -39,7 +39,7 @@ def plot_results(results: dict[str, list[tuple]], window=20, solved_threshold=20
         ax.plot(steps, avg, color=color, linewidth=2, label=label)
 
     ax.axhline(solved_threshold, color="#E24B4A", linewidth=1.5,
-               linestyle="--", label=f"solved ({solved_threshold})")
+               linestyle="--", label=f"max reward ({solved_threshold})")
 
     ax.set_xlabel("environment steps")
     ax.set_ylabel("episode return")
@@ -54,9 +54,9 @@ def plot_results(results: dict[str, list[tuple]], window=20, solved_threshold=20
 
 env = gym.make("CartPole-v1")
 
-actor_critic = AC(env,2,2,0.99, 6.25e-5)
-advantage_actor_critic = A2C(env,2,2,0.99, 6.25e-5)
-REINFORCE_agent = REINFORCE(env,2,2,0.99, 6.25e-5)
+actor_critic = AC(env,2,2,0.99, 0.0001,0.001)
+advantage_actor_critic = A2C(env,2,2,0.99, 0.001,0.01)
+REINFORCE_agent = REINFORCE(env,2,2,0.99, 0.01,0.01)
 
 ac_rewards = actor_critic.optimize(200000)
 a2c_rewards = advantage_actor_critic.optimize(200000)
@@ -64,5 +64,6 @@ REINFORCE_rewards = REINFORCE_agent.optimize(200000)
 
 # --- usage ---
 plot_results({"A2C": a2c_rewards, "AC": ac_rewards, "REINFORCE": REINFORCE_rewards})
+
 
 
