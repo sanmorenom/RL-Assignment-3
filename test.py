@@ -54,9 +54,9 @@ def plot_results(results: dict[str, list[tuple]], window=20, solved_threshold=50
 
 env = gym.make("CartPole-v1")
 
-actor_critic = AC(env,2,2,0.99, 0.0001,0.001)
-advantage_actor_critic = A2C(env,2,2,0.99, 0.001,0.01)
-REINFORCE_agent = REINFORCE(env,2,2,0.99, 0.01,0.01)
+actor_critic = AC(env,2,2,0.99, 6.25e-5,6.25e-5)
+advantage_actor_critic = A2C(env,2,2,0.99, 6.25e-5,6.25e-5)
+REINFORCE_agent = REINFORCE(env,2,2,0.99, 6.25e-5,6.25e-5)
 
 ac_rewards = actor_critic.optimize(200000)
 a2c_rewards = advantage_actor_critic.optimize(200000)
