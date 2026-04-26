@@ -26,9 +26,9 @@ class Actor(nn.Module):
             x = F.relu(getattr(self, 'layer%d' % (idx+1))(x))
         return F.softmax(self.a_out(x), dim=-1)
     
-class Critic(nn.Module):
+class QCritic(nn.Module):
     def __init__(self, n_observations, n_actions, n_layers):
-        super(Critic, self).__init__()
+        super(QCritic, self).__init__()
         self.n_layers = n_layers
         self.c_in = nn.Linear(n_observations, 128)
         for idx in range(self.n_layers):
@@ -41,12 +41,27 @@ class Critic(nn.Module):
             x = F.relu(getattr(self, 'layer%d' % (idx+1))(x))
         return self.c_out(x)
     
+class VCritic(nn.Module):
+    def __init__(self, n_observations, n_layers):
+        super(VCritic, self).__init__()
+        self.n_layers = n_layers
+        self.c_in = nn.Linear(n_observations, 128)
+        for idx in range(self.n_layers):
+            setattr(self, f'layer{idx+1}', nn.Linear(128,128))
+        self.c_out = nn.Linear(128, 1)
+
+    def forward(self, observations):
+        x = F.relu(self.c_in(observations))
+        for idx in range(self.n_layers):
+            x = F.relu(getattr(self, 'layer%d' % (idx+1))(x))
+        return self.c_out(x)
+    
 class ModelFreeLearner():
     """
     ModelFreeLearner serves as a perent class for the REINFORCE, ActorCritic (AC) and
     Advantage Actor Critic (A2C). 
     This design choice prevents code duplication since the core functionalities in the 
-    optimization/ training step is the same for each learner. We initialize the 
+    optimization/training step is the same for each learner.  
     """
     def __init__(self, env:gym.Env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
         # initialize environment and exrtract state and action space
@@ -60,7 +75,7 @@ class ModelFreeLearner():
 
         # initialize actor and critic functions
         self.actor = Actor(self.n_observations,self.n_actions,n_actor_layers)
-        self.critic = Critic(self.n_observations,self.n_actions,n_critic_layers)
+        self.critic = QCritic(self.n_observations,self.n_actions,n_critic_layers)
 
         # initialize buffers to safe rewards during episodes
         self.values = []
@@ -116,17 +131,22 @@ class ModelFreeLearner():
     def __get_returns__(self):
         returns = []
         R = 0 
-
         # iterate over reversed rewards array 
         for r in self.rewards[::-1]:
             R = r + self.gamma * R
             returns.insert(0,R)
         return torch.as_tensor(returns, dtype=torch.float32)
     
+    def __safe_to_buffer__(self,state,action,reward,log_prob):
+        self.values.append(self.critic(torch.tensor(state))[action])
+        self.rewards.append(reward)
+        self.log_probs.append(log_prob)
+
     def optimize(self, budget):
         iterations = budget
         t0 = time()
-        episode_rewards = []
+        performance = 0
+        evaluation = []
         # sample episodes within a given budget
         while budget>0:
             self.__reset_buffers__()
@@ -134,27 +154,28 @@ class ModelFreeLearner():
 
             # sample action from actor (calculate the log prob as well to prevent overhead)
             action, log_prob = self.__select_action__(state)
-            
+        
             terminated = False
             episode_reward = 0.0
-            # sample single episode 
-            for step in count(1):
+            # sample full episode 
+            while True:
                 # take action in env
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 
                 # save info to buffers
-                self.values.append(self.critic(torch.tensor(state))[action])
-                self.rewards.append(reward)
-                self.log_probs.append(log_prob)
+                self.__safe_to_buffer__(state,action,reward,log_prob)
 
                 next_action, log_prob = self.__select_action__(state)
                 
                 # advance state and action
                 state = next_state
                 action = next_action
-
-                episode_reward += reward 
+ 
                 budget -=1
+
+                if budget % 250 == 0 :
+                    performance = self.__evaluate_policy__()
+                    evaluation.append((performance,iterations-budget))
 
                 if terminated or truncated:
                     break
@@ -169,97 +190,33 @@ class ModelFreeLearner():
             # empty the buffers
             self.__reset_buffers__()
 
-            episode_rewards.append((episode_reward,iterations-budget))
             progress = (((iterations-budget)/iterations)*100)
             eta = (time()-t0)*((100-progress)/progress)
-            print(f"\rProgress: {progress:.2f}% ETA: {(eta):.0f}s", end='', flush=True)
+            print(f"\rProgress: {progress:.2f}% ETA: {(eta):.0f}s Current performance: {(performance):.1f}", end='', flush=True)
         print() 
-        return episode_rewards
+        return evaluation
     
-    def __evla_policy__(self, eval_iterations = 3):
-        episode_returns = []
-        eval_env = gym.make("CartPole-v1")
-        for _ in range(eval_iterations):
-            episode_return = 0
-            s, _  = eval_env.reset()
-            with torch.no_grad():
-                #The mode is used to simulate greedy selection for the evaluation
-                a, log_prob = self.__select_action_mode__(s)
+    def __evaluate_policy__(self):
+        "Evaluates the current policy over 3 episodes and returns average return"
+        episode_return = 0
+        eval_env = gym.make(self.env.spec)
+        for i in range(3):
+            state, _  = eval_env.reset()
             terminated = False
-            while not terminated:
-                sp, r, terminated, truncated, _ = eval_env.step(a)
-                terminated = terminated or truncated
-                episode_return += r
-                with torch.no_grad():
-                    a, log_prob = self.__select_action_mode__(s)
-                
-                s = sp
-            episode_returns.append(episode_return)
-        eval_env.close()
-        return np.mean(episode_returns)
-    
-    def optimize_with_eval(self, budget, eval_rate = 250):
-        iterations = budget
-        counter = 0
-        t0 = time()
-        episode_rewards = []
-        eval_timesteps = []
-        eval_returns = []
-        # sample episodes within a given budget
-        while budget>0:
-            self.__reset_buffers__()
-            state, _  = self.env.reset()
-
-            # sample action from actor (calculate the log prob as well to prevent overhead)
-            action, log_prob = self.__select_action__(state)
-            
-            terminated = False
-            episode_reward = 0.0
-            # sample single episode 
-            for step in count(1):
-                # take action in env
-                next_state, reward, terminated, truncated, _ = self.env.step(action)
-                counter += 1
-                
-                # save info to buffers
-                self.values.append(self.critic(torch.tensor(state))[action])
-                self.rewards.append(reward)
-                self.log_probs.append(log_prob)
-
-                next_action, log_prob = self.__select_action__(state)
-                
-                # advance state and action
+            while True:
+                action, log_prob = self.__select_action__(state)
+                next_state, reward, terminated, truncated, _ = eval_env.step(action)
                 state = next_state
-                action = next_action
-
-                episode_reward += reward 
-                budget -=1
-                if counter % eval_rate == 0 and budget >=0:
-                    eval_timesteps.append(counter)
-                    eval_return = self.__evla_policy__()
-                    eval_returns.append(eval_return)
-                    
+                episode_return += reward 
                 if terminated or truncated:
                     break
+        return episode_return/3
 
-            # calculate returns based on rewards 
-            returns = self.__get_returns__()
-
-            # update both actor and critic
-            self.__update_actor__(returns)
-            self.__update_critic__(returns)
-
-            # empty the buffers
-            self.__reset_buffers__()
-
-            episode_rewards.append((episode_reward,iterations-budget))
-            progress = (((iterations-budget)/iterations)*100)
-            eta = (time()-t0)*((100-progress)/progress)
-            print(f"\rProgress: {progress:.2f}% ETA: {(eta):.0f}s", end='', flush=True)
-        print() 
-        return eval_timesteps, eval_returns
 
     
+
+
+
 class REINFORCE(ModelFreeLearner):
     def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
         super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
@@ -279,6 +236,7 @@ class REINFORCE(ModelFreeLearner):
     def __get_deltas__(self, state, action, reward, next_state, next_action):
         pass
 
+
 class AC(ModelFreeLearner):
     def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
         super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
@@ -293,21 +251,31 @@ class AC(ModelFreeLearner):
         self.actor_optim.step()
 
 
+
 class A2C(ModelFreeLearner):
     def __init__(self, env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr):
         super().__init__(env, n_actor_layers, n_critic_layers, gamma, actor_lr, critic_lr)
+        # overwrite critic from parent class to implement value network
+        self.critic = VCritic(self.n_observations,n_critic_layers)
+        self.critic_optim = optim.Adam(self.critic.parameters(), lr=critic_lr)
     
     def __update_actor__(self, returns):
         # calculate advantages
         advantages = returns - torch.stack(self.values).detach()
-        # consider normalizing advantages for stability 
-        #advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) 
+        # normalizing advantages for stability 
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) 
         loss = torch.sum(-torch.stack(self.log_probs) * advantages)
 
         # do gradient decent step
         self.actor_optim.zero_grad()
         loss.backward()
         self.actor_optim.step()
+    
+    def __safe_to_buffer__(self, state, action, reward, log_prob):
+        # parant class implements q_net; thus we overwrite it with V_net
+        self.values.append(self.critic(torch.tensor(state)).squeeze(-1))
+        self.rewards.append(reward)
+        self.log_probs.append(log_prob)
 
 
 
@@ -315,5 +283,5 @@ if __name__ == "__main__":
 
     # quick test run; The episode returns are maximised at roughly 98 since we are using a discount factor 
     env = gym.make("CartPole-v1")
-    actor_critic = AC(env,1,1,0.99, 0.001,0.01)
+    actor_critic = A2C(env,2,2,0.99, 0.001,0.01)
     actor_critic.optimize(200000)
