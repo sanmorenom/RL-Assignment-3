@@ -84,6 +84,18 @@ class ModelFreeLearner():
         # also return log probability since we need it for actor updates
         return action.item(), action_dist.log_prob(action)
     
+    def __select_action_mode__(self, state):
+        state = torch.from_numpy(state).float()
+        
+        # get action probabilitys and  estimates
+        probs = self.actor(state)
+        action_dist = Categorical(probs)
+    
+        # sample an action using probability estimates
+        action = action_dist.mode
+
+        # also return log probability since we need it for actor updates
+        return action.item(), action_dist.log_prob(action)
     def __reset_buffers__(self):
         del self.values[:]
         del self.log_probs[:]
@@ -164,7 +176,88 @@ class ModelFreeLearner():
         print() 
         return episode_rewards
     
+    def __evla_policy__(self, eval_iterations = 3):
+        episode_returns = []
+        eval_env = gym.make("CartPole-v1")
+        for _ in range(eval_iterations):
+            episode_return = 0
+            s, _  = eval_env.reset()
+            with torch.no_grad():
+                #The mode is used to simulate greedy selection for the evaluation
+                a, log_prob = self.__select_action_mode__(s)
+            terminated = False
+            while not terminated:
+                sp, r, terminated, truncated, _ = eval_env.step(a)
+                terminated = terminated or truncated
+                episode_return += r
+                with torch.no_grad():
+                    a, log_prob = self.__select_action_mode__(s)
+                
+                s = sp
+            episode_returns.append(episode_return)
+        eval_env.close()
+        return np.mean(episode_returns)
+    
+    def optimize_with_eval(self, budget, eval_rate = 250):
+        iterations = budget
+        counter = 0
+        t0 = time()
+        episode_rewards = []
+        eval_timesteps = []
+        eval_returns = []
+        # sample episodes within a given budget
+        while budget>0:
+            self.__reset_buffers__()
+            state, _  = self.env.reset()
 
+            # sample action from actor (calculate the log prob as well to prevent overhead)
+            action, log_prob = self.__select_action__(state)
+            
+            terminated = False
+            episode_reward = 0.0
+            # sample single episode 
+            for step in count(1):
+                # take action in env
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
+                counter += 1
+                
+                # save info to buffers
+                self.values.append(self.critic(torch.tensor(state))[action])
+                self.rewards.append(reward)
+                self.log_probs.append(log_prob)
+
+                next_action, log_prob = self.__select_action__(state)
+                
+                # advance state and action
+                state = next_state
+                action = next_action
+
+                episode_reward += reward 
+                budget -=1
+                if counter % eval_rate == 0 and budget >=0:
+                    eval_timesteps.append(counter)
+                    eval_return = self.__evla_policy__()
+                    eval_returns.append(eval_return)
+                    
+                if terminated or truncated:
+                    break
+
+            # calculate returns based on rewards 
+            returns = self.__get_returns__()
+
+            # update both actor and critic
+            self.__update_actor__(returns)
+            self.__update_critic__(returns)
+
+            # empty the buffers
+            self.__reset_buffers__()
+
+            episode_rewards.append((episode_reward,iterations-budget))
+            progress = (((iterations-budget)/iterations)*100)
+            eta = (time()-t0)*((100-progress)/progress)
+            print(f"\rProgress: {progress:.2f}% ETA: {(eta):.0f}s", end='', flush=True)
+        print() 
+        return eval_timesteps, eval_returns
 
     
 class REINFORCE(ModelFreeLearner):
