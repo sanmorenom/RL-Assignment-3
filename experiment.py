@@ -119,9 +119,9 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
 #select a seed to make results replicable
 torch.manual_seed(2001)
 
-#get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
-#get_full_run_results('AC', AC, budget = 1e6)
-#get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
+get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
+get_full_run_results('AC', AC, budget = 1e6)
+get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
 plot_full_runs()
 
 
