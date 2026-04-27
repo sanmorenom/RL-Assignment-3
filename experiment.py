@@ -52,8 +52,6 @@ def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions
         results.append(np.array(curr_eval_returns))
     
     results = np.array(results)
-    print(results)
-    print(curr_eval_timesteps)
     #export evaluation to a csv file
     df = pd.DataFrame({
         "eval_timesteps": list(map(int, curr_eval_timesteps)),
@@ -93,7 +91,7 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
     #define smoothing window
     smoothing_window = 81
     colors = ["#1D9E75", "#D85A30", "#378ADD", "#BA7517"]
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(8, 6))
     #plot for every item collected, adding smoothing with a savgol_filter
     for item, color in zip(items, colors):
         smooth = savgol_filter(item['y'],smoothing_window,2)
@@ -108,7 +106,7 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
 
     ax.set_xlabel("environment steps")
     ax.set_ylabel("episode return")
-    ax.set_title("actor-critic training — CartPole-v1")
+    ax.set_title("Learning curves in the CartPole environment")
     ax.legend()
     ax.grid(alpha=0.2)
     ax.set_ylim(bottom=0)
@@ -119,9 +117,9 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
 #select a seed to make results replicable
 torch.manual_seed(2001)
 
-get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
-get_full_run_results('AC', AC, budget = 1e6)
-get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
+#get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
+#get_full_run_results('AC', AC, budget = 1e6)
+#get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
 plot_full_runs()
 
 
