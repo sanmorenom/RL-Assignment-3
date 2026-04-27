@@ -58,7 +58,7 @@ class VCritic(nn.Module):
     
 class ModelFreeLearner():
     """
-    ModelFreeLearner serves as a perent class for the REINFORCE, ActorCritic (AC) and
+    ModelFreeLearner serves as a parent class for the REINFORCE, ActorCritic (AC) and
     Advantage Actor Critic (A2C). 
     This design choice prevents code duplication since the core functionalities in the 
     optimization/training step is the same for each learner.  
@@ -106,11 +106,10 @@ class ModelFreeLearner():
         probs = self.actor(state)
         action_dist = Categorical(probs)
     
-        # sample an action using probability estimates
+        # Get the mode of the distribution to simulate greedy action selection
         action = action_dist.mode
 
-        # also return log probability since we need it for actor updates
-        return action.item(), action_dist.log_prob(action)
+        return action.item()
     def __reset_buffers__(self):
         del self.values[:]
         del self.log_probs[:]
@@ -173,7 +172,7 @@ class ModelFreeLearner():
  
                 budget -=1
 
-                if budget % 250 == 0 :
+                if budget % 250 == 0:
                     performance = self.__evaluate_policy__()
                     evaluation.append((performance,iterations-budget))
 
@@ -204,7 +203,8 @@ class ModelFreeLearner():
             state, _  = eval_env.reset()
             terminated = False
             while True:
-                action, log_prob = self.__select_action__(state)
+                #using the mode of the action distribution for greedy action selection
+                action = self.__select_action_mode__(state)
                 next_state, reward, terminated, truncated, _ = eval_env.step(action)
                 state = next_state
                 episode_return += reward 

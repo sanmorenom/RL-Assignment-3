@@ -1,8 +1,7 @@
 """
-Test file for visulizing the results of a single run REINFROCE AC and A2C; saves the result to file result.png
+Experiment file used to get the averaged results of multiple runs of REINFORCE, AC and A2C, creating csv files with the averages
+and plotting themm together.
 """
-
-
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -17,11 +16,14 @@ import torch
 import csv
 from scipy.signal import savgol_filter
 
-def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions = 5, actor_lr = 1e-4, critic_lr = 1e-3, budget =  200000):    
-    # Specify the directory name
+def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions = 5, actor_lr = 1e-4, critic_lr = 1e-3, budget =  200000):  
+    """
+    Executes the optimization process for the correspondent type of ModelFreeLearner, and generates a csv file with the averaged resuls.
+    """  
+    # specify the directory name
     directory_name = 'Full_Run_Results'
 
-    # Create the directory
+    # create the directory
     try:
         os.mkdir(directory_name)
         print(f"Directory '{directory_name}' created successfully.")
@@ -35,16 +37,26 @@ def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions
     print(f'Running experiment: {file_path}')
 
     results = []
+    
+    #loop over number of repetitions for averaging
     for i in range(num_repetitions):
         curr_env = gym.make("CartPole-v1")
-
+        #Initialize learner depending on the experiment
         learner = learner_type(curr_env,2,2,0.99, actor_lr,critic_lr)
-        curr_eval_timesteps, curr_eval_returns  = learner.optimize_with_eval(budget)
+        #Get optimization results
+        evaluation = learner.optimize(budget)
+        if len(evaluation) > (budget/250):
+            evaluation = evaluation[:-int(len(evaluation) - (budget/250))]
+        curr_eval_returns, curr_eval_timesteps  = [*zip(*evaluation)]
+        
         results.append(np.array(curr_eval_returns))
     
     results = np.array(results)
+    print(results)
+    print(curr_eval_timesteps)
+    #export evaluation to a csv file
     df = pd.DataFrame({
-        "eval_timesteps": curr_eval_timesteps,
+        "eval_timesteps": list(map(int, curr_eval_timesteps)),
         "eval_mean_returns":np.mean(results, axis=0),
         "eval_std_returns":np.std(results, axis=0)
         })
@@ -52,14 +64,14 @@ def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions
 
 def plot_full_runs(solved_threshold=500, num_repetitions = 5):
     """
-    results: dict of {"label": episode_rewards list, ...}
-    e.g. {"A2C": a2c_rewards, "AC": ac_rewards}
+    Goes through the Full_Run_Results folder and plots the results of each csv file in it
     """
     items = []
     folder = f'Full_Run_Results/'
     files = os.listdir(folder)
     index = 0
 
+    #iterate through the files getting the file name for the plot title, timesteps, results and standard deviation, saving it as an item
     while index < len(files):
         x = []
         y = []
@@ -78,10 +90,11 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
                         std.append(float(row[3]))
             items.append({'label':title,'x':x,'y':y,'std':std})
         index +=1
+    #define smoothing window
     smoothing_window = 81
     colors = ["#1D9E75", "#D85A30", "#378ADD", "#BA7517"]
     fig, ax = plt.subplots(figsize=(10, 5))
-
+    #plot for every item collected, adding smoothing with a savgol_filter
     for item, color in zip(items, colors):
         smooth = savgol_filter(item['y'],smoothing_window,2)
         err = item["std"]/np.sqrt(num_repetitions)
@@ -89,7 +102,7 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
         ax.plot(item["x"], smooth, color=color, linewidth=2, label=item["label"])
         ax.fill_between(item["x"],smooth-err_smooth,smooth+err_smooth,alpha=0.2, color=color)
         
-
+    #plot max reward threshold
     ax.axhline(solved_threshold, color="#E24B4A", linewidth=1.5,
                linestyle="--", label=f"max reward ({solved_threshold})")
 
@@ -102,12 +115,13 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
     plt.tight_layout()
     plt.savefig("results.png", dpi=150)
     plt.show()
- 
+
+#select a seed to make results replicable
 torch.manual_seed(2001)
 
 #get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
 #get_full_run_results('AC', AC, budget = 1e6)
-#get_full_run_results('A2C', A2C, budget = 1e6)
+#get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
 plot_full_runs()
 
 
