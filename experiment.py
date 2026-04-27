@@ -95,7 +95,7 @@ def plot_full_runs(solved_threshold=500, num_repetitions = 5):
         index +=1
     #define smoothing window
     smoothing_window = 81
-    colors = ["#1D9E75", "#D85A30", "#378ADD", "#BA7517"]
+    colors = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd"]
     fig, ax = plt.subplots(figsize=(8, 6))
     #plot for every item collected, adding smoothing with a savgol_filter
     for item, color in zip(items, colors):
