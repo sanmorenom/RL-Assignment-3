@@ -2,14 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
+import gymnasium as gym
 
-import numpy as np
-from collections import namedtuple
-from itertools import count
+from torch.distributions import Categorical
 from time import time
 
-import gymnasium as gym
+
 
 class Actor(nn.Module):
     def __init__(self, n_observations, n_actions, n_layers):

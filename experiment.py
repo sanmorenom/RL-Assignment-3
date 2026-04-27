@@ -2,11 +2,8 @@
 Experiment file used to get the averaged results of multiple runs of REINFORCE, AC and A2C, creating csv files with the averages
 and plotting themm together.
 """
-
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
-from agents import A2C,AC,REINFORCE, ModelFreeLearner
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +11,9 @@ import pandas as pd
 import os
 import torch
 import csv
+
 from scipy.signal import savgol_filter
+from agents import *
 
 def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions = 5, actor_lr = 1e-4, critic_lr = 1e-3, budget =  200000):  
     """
