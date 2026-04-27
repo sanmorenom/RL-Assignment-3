@@ -7,7 +7,7 @@ To train an agent, please do the following:
 1. Import required libraries
 ```Python
 import gymnasium as gym
-from agents import REINFORCE, AC, A2C
+from agents import *
 ```
 2. Initialize CartPole environment
 ```Python
@@ -16,6 +16,7 @@ env = gym.make("CartPole-v1")
 
 3. Initialize agent training instance with environment, network parameters, and hyperparameters
 ```Python
+# ModelFreeLearner is the parent class for REINFORCE, AC and A2C
 ModelFreeLearner(
   env=env,
   n_actor_layers = 2,
