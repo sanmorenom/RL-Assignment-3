@@ -23,17 +23,17 @@ def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions
     # specify the directory name
     directory_name = 'Full_Run_Results'
 
-    # create the directory
-    try:
+    # create the directory if it dosnt exist
+    if not os.path.isdir(directory_name):
         os.mkdir(directory_name)
-        print(f"Directory '{directory_name}' created successfully.")
-    except FileExistsError:
-        print(f"Directory '{directory_name}' already exists.")
-    except PermissionError:
-        print(f"Permission denied: Unable to create '{directory_name}'.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+
     file_path = f'{directory_name}/{file_name}.csv'
+
+    if os.path.exists(file_path):
+        # prevents rerunning experiments
+        print(f'Experiment already completed! Results at: {file_path}')
+        return
+    
     print(f'Running experiment: {file_path}')
 
     results = []
@@ -41,8 +41,13 @@ def get_full_run_results(file_name,learner_type:ModelFreeLearner,num_repetitions
     #loop over number of repetitions for averaging
     for i in range(num_repetitions):
         curr_env = gym.make("CartPole-v1")
+        
         #Initialize learner depending on the experiment
-        learner = learner_type(curr_env,2,2,0.99, actor_lr,critic_lr)
+        if file_name == "A2C_Norm":
+            learner = learner_type(curr_env,2,2,0.99, actor_lr,critic_lr, True)
+        else:
+            learner = learner_type(curr_env,2,2,0.99, actor_lr,critic_lr)
+
         #Get optimization results
         evaluation = learner.optimize(budget)
         if len(evaluation) > (budget/250):
@@ -120,6 +125,7 @@ torch.manual_seed(2001)
 get_full_run_results('REINFORCE', REINFORCE, budget = 1e6)
 get_full_run_results('AC', AC, budget = 1e6)
 get_full_run_results('A2C', A2C, budget = 1e6, critic_lr = 1e-4)
+get_full_run_results('A2C_Norm', A2C, budget = 1e6, critic_lr = 1e-4)
 plot_full_runs()
 
 
