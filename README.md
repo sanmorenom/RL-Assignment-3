@@ -16,7 +16,7 @@ env = gym.make("CartPole-v1")
 
 3. Initialize agent training instance with environment, network parameters, and hyperparameters
 ```Python
-# ModelFreeLearner is the parent class for REINFORCE, AC and A2C
+# ModelFreeLearner is the parent class for REINFORCE, AC, and A2C
 ModelFreeLearner(
   env=env,
   n_actor_layers = 2,
@@ -25,6 +25,10 @@ ModelFreeLearner(
   actor_lr = 0.001,
   critic_lr = 0.001
 )
+```
+4. Train the agent
+```Python
+ModelFreeLearner.optimize(budget = 1000000)
 ```
 ## Dependencies
 For testing and conducting our experiments, we used a conda environment. All its dependencies are given in the `requirements.txt` file.
